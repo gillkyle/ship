@@ -1,4 +1,4 @@
-# local
+# Ship CLI
 
 To install dependencies:
 

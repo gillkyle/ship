@@ -1,11 +1,12 @@
 import * as p from "@clack/prompts"
-import type { CommitDetails, PrDetails } from "./states.ts"
+import type { CliMode, CommitDetails, FileEntry, PrDetails, StackPlan } from "./states.ts"
 
 // ── Provider Interface ─────────────────────────────────────────────
 
 export interface LlmProvider {
 	generateCommitDetails(diff: string): Promise<CommitDetails | null>
 	generatePrDetails(diff: string): Promise<PrDetails | null>
+	generateStackPlan(files: FileEntry[], diff: string): Promise<StackPlan | null>
 }
 
 // ── System Prompts ─────────────────────────────────────────────────
@@ -19,6 +20,14 @@ const COMMIT_SYSTEM_PROMPT = `You are a git commit message generator. Given a di
 const PR_SYSTEM_PROMPT = `You are a PR description generator. Given a diff, produce:
 - pr_title: PR title under 70 chars with conventional prefix (feat:/fix:/refactor:/perf:/chore:/docs:)
 - pr_body: markdown with ## Summary (1-3 bullets) and ## Changes (brief description)`
+
+const STACK_SYSTEM_PROMPT = `You are a git commit organizer. Given changed files and their diff, group them into logical, atomic commits.
+Rules:
+- Each group = one logical change (feature, refactor, fix, etc.)
+- Every file in exactly one group
+- Order: foundational changes first
+- Each group gets a conventional commit message (fix:/feat:/etc., first line <72 chars)
+- One branch_name (kebab-case), pr_title (<70 chars), and pr_body (markdown) for the whole set`
 
 // ── JSON Schemas ───────────────────────────────────────────────────
 
@@ -44,6 +53,29 @@ const PR_SCHEMA = {
 	additionalProperties: false as const,
 }
 
+const STACK_SCHEMA = {
+	type: "object" as const,
+	properties: {
+		groups: {
+			type: "array" as const,
+			items: {
+				type: "object" as const,
+				properties: {
+					files: { type: "array" as const, items: { type: "string" as const } },
+					commit_message: { type: "string" as const },
+				},
+				required: ["files", "commit_message"] as const,
+				additionalProperties: false as const,
+			},
+		},
+		branch_name: { type: "string" as const },
+		pr_title: { type: "string" as const },
+		pr_body: { type: "string" as const },
+	},
+	required: ["groups", "branch_name", "pr_title", "pr_body"] as const,
+	additionalProperties: false as const,
+}
+
 // ── Groq Provider ──────────────────────────────────────────────────
 
 class GroqProvider implements LlmProvider {
@@ -65,6 +97,17 @@ class GroqProvider implements LlmProvider {
 		}))
 	}
 
+	async generateStackPlan(files: FileEntry[], diff: string): Promise<StackPlan | null> {
+		const fileList = files.map(f => `${f.status}: ${f.path}`).join("\n")
+		const userContent = `Files:\n${fileList}\n\nDiff:\n${diff}`
+		return this.call<StackPlan>(STACK_SYSTEM_PROMPT, userContent, "stack_plan", STACK_SCHEMA, raw => ({
+			groups: raw.groups.map((g: any) => ({ files: g.files, commitMessage: g.commit_message })),
+			branchName: raw.branch_name,
+			prTitle: raw.pr_title,
+			prBody: raw.pr_body,
+		}))
+	}
+
 	private async call<T>(systemPrompt: string, diff: string, name: string, schema: object, map: (raw: any) => T): Promise<T | null> {
 		try {
 			const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -74,21 +117,26 @@ class GroqProvider implements LlmProvider {
 					Authorization: `Bearer ${this.apiKey}`,
 				},
 				body: JSON.stringify({
-					model: "llama-3.3-70b-versatile",
+					model: "moonshotai/kimi-k2-instruct-0905",
 					messages: [
 						{ role: "system", content: systemPrompt },
 						{ role: "user", content: diff },
 					],
 					response_format: {
 						type: "json_schema",
-						json_schema: { name, strict: true, schema },
+						json_schema: { name, strict: false, schema },
 					},
 				}),
 			})
-			if (!res.ok) return null
+			if (!res.ok) {
+				const text = await res.text().catch(() => "")
+				p.log.warn(`Groq API error (${res.status}): ${text.slice(0, 200)}`)
+				return null
+			}
 			const data = await res.json() as { choices: Array<{ message: { content: string } }> }
 			return map(JSON.parse(data.choices[0]!.message.content))
-		} catch {
+		} catch (err) {
+			p.log.warn(`Groq request failed: ${err instanceof Error ? err.message : String(err)}`)
 			return null
 		}
 	}
@@ -110,6 +158,17 @@ class AnthropicProvider implements LlmProvider {
 
 	async generatePrDetails(diff: string): Promise<PrDetails | null> {
 		return this.call<PrDetails>(PR_SYSTEM_PROMPT, diff, "pr_details", PR_SCHEMA, raw => ({
+			prTitle: raw.pr_title,
+			prBody: raw.pr_body,
+		}))
+	}
+
+	async generateStackPlan(files: FileEntry[], diff: string): Promise<StackPlan | null> {
+		const fileList = files.map(f => `${f.status}: ${f.path}`).join("\n")
+		const userContent = `Files:\n${fileList}\n\nDiff:\n${diff}`
+		return this.call<StackPlan>(STACK_SYSTEM_PROMPT, userContent, "stack_plan", STACK_SCHEMA, raw => ({
+			groups: raw.groups.map((g: any) => ({ files: g.files, commitMessage: g.commit_message })),
+			branchName: raw.branch_name,
 			prTitle: raw.pr_title,
 			prBody: raw.pr_body,
 		}))
@@ -149,7 +208,7 @@ class AnthropicProvider implements LlmProvider {
 
 // ── Manual Provider ────────────────────────────────────────────────
 
-class ManualProvider implements LlmProvider {
+export class ManualProvider implements LlmProvider {
 	async generateCommitDetails(_diff: string): Promise<CommitDetails | null> {
 		const branchName = await p.text({ message: "Branch name", placeholder: "feat-my-feature" })
 		if (p.isCancel(branchName)) return null
@@ -180,33 +239,26 @@ class ManualProvider implements LlmProvider {
 
 		return { prTitle: prTitle as string, prBody: prBody as string }
 	}
+
+	async generateStackPlan(_files: FileEntry[], _diff: string): Promise<StackPlan | null> {
+		return null
+	}
 }
 
 // ── Factory ────────────────────────────────────────────────────────
 
-export function createLlmProvider(): LlmProvider {
+export function createLlmProvider(mode: CliMode): LlmProvider {
 	const groqKey = process.env.GROQ_API_KEY
 	const anthropicKey = process.env.ANTHROPIC_API_KEY
 
-	if (groqKey) return withFallback(new GroqProvider(groqKey))
-	if (anthropicKey) return withFallback(new AnthropicProvider(anthropicKey))
-	return new ManualProvider()
-}
-
-function withFallback(primary: LlmProvider): LlmProvider {
-	const manual = new ManualProvider()
-	return {
-		async generateCommitDetails(diff: string) {
-			const result = await primary.generateCommitDetails(diff)
-			if (result) return result
-			p.log.warn("LLM call failed, falling back to manual input.")
-			return manual.generateCommitDetails(diff)
-		},
-		async generatePrDetails(diff: string) {
-			const result = await primary.generatePrDetails(diff)
-			if (result) return result
-			p.log.warn("LLM call failed, falling back to manual input.")
-			return manual.generatePrDetails(diff)
-		},
+	if (mode.kind === "auto") {
+		if (groqKey) return new GroqProvider(groqKey)
+		if (anthropicKey) return new AnthropicProvider(anthropicKey)
+		p.log.error("Autonomous mode requires GROQ_API_KEY or ANTHROPIC_API_KEY.")
+		process.exit(1)
 	}
+
+	if (groqKey) return new GroqProvider(groqKey)
+	if (anthropicKey) return new AnthropicProvider(anthropicKey)
+	return new ManualProvider()
 }

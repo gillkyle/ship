@@ -1,3 +1,9 @@
+// ── CLI Mode ──────────────────────────────────────────────────────
+
+export type CliMode =
+	| { kind: "interactive" }
+	| { kind: "auto"; goal: "local" | "push" | "pr"; stack: boolean }
+
 // ── Data Types ─────────────────────────────────────────────────────
 
 export interface GitContext {
@@ -30,6 +36,18 @@ export interface PrDetails {
 	prBody: string
 }
 
+export interface StackGroup {
+	files: string[]
+	commitMessage: string
+}
+
+export interface StackPlan {
+	groups: StackGroup[]
+	branchName: string
+	prTitle: string
+	prBody: string
+}
+
 // ── States ─────────────────────────────────────────────────────────
 
 export type State =
@@ -58,6 +76,7 @@ export type State =
 	| { kind: "pushing"; git: GitContext; branchName: string; details: CommitDetails; postPush: "check_pr" | "done" }
 	| { kind: "checking_pr"; git: GitContext; details: CommitDetails; branchName: string }
 	| { kind: "confirming_pr"; git: GitContext; details: CommitDetails; branchName: string }
+	| { kind: "stack_committing"; git: GitContext; plan: StackPlan; currentIndex: number }
 	| { kind: "creating_pr"; git: GitContext; details: CommitDetails; branchName: string }
 	| { kind: "confirming_merge"; git: GitContext; branchName: string; prUrl: string }
 	| { kind: "merging"; git: GitContext; branchName: string; prUrl: string }
@@ -104,6 +123,8 @@ export type Event =
 	| { kind: "pull_done" }
 	| { kind: "pull_conflict"; message: string }
 	| { kind: "post_commit_choice"; choice: "create_pr" | "push_only" | "commit_more" | "done" }
+	| { kind: "stack_plan_generated"; plan: StackPlan }
+	| { kind: "stack_commit_done"; nextIndex: number }
 
 // ── Effects ────────────────────────────────────────────────────────
 
@@ -143,6 +164,7 @@ export type Effect =
 	| { kind: "prompt_confirm_pull"; behind: number }
 	| { kind: "pull_remote"; branch: string }
 	| { kind: "prompt_post_commit" }
+	| { kind: "execute_stack_commit"; group: StackGroup; branchName: string; isFirst: boolean; onMain: boolean; index: number }
 
 // ── Helpers ────────────────────────────────────────────────────────
 
