@@ -13,13 +13,15 @@ export interface LlmProvider {
 
 const COMMIT_SYSTEM_PROMPT = `You are a git commit message generator. Given a diff, produce:
 - branch_name: kebab-case branch name (e.g. fix-sql-parser, feat-add-auth)
-- commit_message: conventional commit (first line under 72 chars with fix:/feat:/refactor:/perf:/chore:/docs: prefix, then blank line, then optionally 1-3 bullet points if non-trivial)
+- commit_message: conventional commit (first line under 72 chars with fix:/feat:/refactor:/perf:/chore:/docs: prefix, then blank line, then optionally 1-3 terse bullet points if non-trivial)
 - pr_title: PR title under 70 chars, same conventional prefix
-- pr_body: markdown with ## Summary (1-3 bullets) and ## Changes (brief description)`
+- pr_body: markdown with ## Summary (1-3 bullets) and ## Changes (file list or one-liner)
+Be extremely terse. No filler words, no restating the obvious. State what changed and why, nothing more.`
 
 const PR_SYSTEM_PROMPT = `You are a PR description generator. Given a diff, produce:
 - pr_title: PR title under 70 chars with conventional prefix (feat:/fix:/refactor:/perf:/chore:/docs:)
-- pr_body: markdown with ## Summary (1-3 bullets) and ## Changes (brief description)`
+- pr_body: markdown with ## Summary (1-3 bullets) and ## Changes (file list or one-liner)
+Be extremely terse. No filler words, no restating the obvious. State what changed and why, nothing more.`
 
 const STACK_SYSTEM_PROMPT = `You are a git commit organizer. Given changed files and their diff, group them into logical, atomic commits.
 Rules:
@@ -27,7 +29,8 @@ Rules:
 - Every file in exactly one group
 - Order: foundational changes first
 - Each group gets a conventional commit message (fix:/feat:/etc., first line <72 chars)
-- One branch_name (kebab-case), pr_title (<70 chars), and pr_body (markdown) for the whole set`
+- One branch_name (kebab-case), pr_title (<70 chars), and pr_body (markdown) for the whole set
+Be extremely terse. No filler words, no restating the obvious. State what changed and why, nothing more.`
 
 // ── JSON Schemas ───────────────────────────────────────────────────
 
