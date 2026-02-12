@@ -1,4 +1,4 @@
-import type { State, Event, Effect, GitContext } from "./states.ts"
+import type { State, Event, Effect, GitContext, StackPlan } from "./states.ts"
 
 export interface Transition {
 	state: State
@@ -208,6 +208,9 @@ export function transition(state: State, event: Event): Transition {
 		case "picking_files": {
 			if (event.kind === "user_cancelled") {
 				return { state: { kind: "cancelled", message: "Cancelled." }, effects: [] }
+			}
+			if (event.kind === "stack_plan_generated") {
+				return startStackCommitting(state.git, event.plan)
 			}
 			if (event.kind !== "files_picked") return invalid(state, event)
 			return {
@@ -432,6 +435,35 @@ export function transition(state: State, event: Event): Transition {
 			}
 		}
 
+		// ── Stack committing ────────────────────────────────────
+		case "stack_committing": {
+			if (event.kind !== "stack_commit_done") return invalid(state, event)
+			const { plan } = state
+			if (event.nextIndex < plan.groups.length) {
+				return {
+					state: { kind: "stack_committing", git: state.git, plan, currentIndex: event.nextIndex },
+					effects: [{
+						kind: "execute_stack_commit",
+						group: plan.groups[event.nextIndex]!,
+						branchName: plan.branchName,
+						isFirst: false,
+						onMain: false,
+						index: event.nextIndex,
+					}],
+				}
+			}
+			const details = {
+				branchName: plan.branchName,
+				commitMessage: plan.groups.map(g => g.commitMessage).join("\n"),
+				prTitle: plan.prTitle,
+				prBody: plan.prBody,
+			}
+			return {
+				state: { kind: "post_commit", git: { ...state.git, onMain: false }, details, branchName: plan.branchName },
+				effects: [{ kind: "prompt_post_commit" }],
+			}
+		}
+
 		// Terminal states should never receive events
 		case "done":
 		case "cancelled":
@@ -439,6 +471,20 @@ export function transition(state: State, event: Event): Transition {
 		case "nothing_to_ship":
 		case "merge_conflict":
 			return invalid(state, event)
+	}
+}
+
+function startStackCommitting(git: GitContext, plan: StackPlan): Transition {
+	return {
+		state: { kind: "stack_committing", git, plan, currentIndex: 0 },
+		effects: [{
+			kind: "execute_stack_commit",
+			group: plan.groups[0]!,
+			branchName: plan.branchName,
+			isFirst: true,
+			onMain: git.onMain,
+			index: 0,
+		}],
 	}
 }
 

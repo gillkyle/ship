@@ -1,11 +1,15 @@
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 import { run, runOk, runLive } from "./git.ts"
-import type { LlmProvider } from "./llm.ts"
-import type { Effect, Event, FileEntry } from "./states.ts"
+import { ManualProvider, type LlmProvider } from "./llm.ts"
+import type { CliMode, Effect, Event, FileEntry } from "./states.ts"
 
 export class EffectExecutor {
-	constructor(private llm: LlmProvider) {}
+	private manual = new ManualProvider()
+	constructor(private llm: LlmProvider, private mode: CliMode) {}
+
+	private get isAuto() { return this.mode.kind === "auto" }
+	private get isStack() { return this.mode.kind === "auto" && this.mode.stack }
 
 	async execute(effect: Effect): Promise<Event | null> {
 		switch (effect.kind) {
@@ -80,12 +84,19 @@ export class EffectExecutor {
 				const s = p.spinner()
 				s.start("Generating PR details...")
 				const result = await this.llm.generatePrDetails(effect.diff)
-				s.stop("PR details generated.")
-				if (!result) return { kind: "pr_details_failed" }
-				return { kind: "pr_details_generated", prDetails: result }
+				s.stop(result ? "PR details generated." : "LLM generation failed.")
+				if (result) return { kind: "pr_details_generated", prDetails: result }
+				if (this.isAuto) return { kind: "pr_details_failed" }
+				p.log.warn("Falling back to manual input.")
+				const manual = await this.manual.generatePrDetails(effect.diff)
+				if (!manual) return { kind: "pr_details_failed" }
+				return { kind: "pr_details_generated", prDetails: manual }
 			}
 
 			case "prompt_confirm_pr": {
+				if (this.isAuto) {
+					return { kind: "confirm_pr", accepted: true }
+				}
 				p.note(`${pc.bold(effect.prDetails.prTitle)}\n\n${effect.prDetails.prBody}`, "Pull Request")
 				const accepted = await p.confirm({ message: "Create PR with this?", initialValue: true })
 				if (p.isCancel(accepted)) return { kind: "user_cancelled" }
@@ -106,6 +117,9 @@ export class EffectExecutor {
 				return null
 
 			case "prompt_confirm_merge": {
+				if (this.isAuto) {
+					return { kind: "confirm_merge", accepted: false }
+				}
 				const accepted = await p.confirm({ message: "Merge this PR now?", initialValue: true })
 				if (p.isCancel(accepted)) return { kind: "user_cancelled" }
 				return { kind: "confirm_merge", accepted }
@@ -144,28 +158,50 @@ export class EffectExecutor {
 			}
 
 			case "prompt_file_picker": {
-				const ALL = "__all__"
+				if (this.isAuto) {
+					const allPaths = effect.files.map(f => f.path)
+					if (this.isStack) {
+						runOk(["git", "reset", "HEAD", "--quiet"])
+						for (const f of allPaths) runLive(["git", "add", f])
+						const diff = run(["git", "diff", "--cached"])
+						const s = p.spinner()
+						s.start("Generating stack plan...")
+						const plan = await this.llm.generateStackPlan(effect.files, diff)
+						s.stop(plan ? "Stack plan generated." : "Stack plan generation failed.")
+						if (!plan) return { kind: "user_cancelled" }
+						runOk(["git", "reset", "HEAD", "--quiet"])
+						return { kind: "stack_plan_generated", plan }
+					}
+					return { kind: "files_picked", selectedFiles: allPaths }
+				}
 				const statusLabel = {
 					staged: pc.green("staged"),
 					modified: pc.yellow("modified"),
 					new: pc.dim("new"),
 				}
 				const allPaths = effect.files.map(f => f.path)
-				const selected = await p.multiselect({
+				const pickMode = await p.select({
 					message: "Select files to include",
 					options: [
-						{ value: ALL, label: pc.bold("Select all") },
-						...effect.files.map(f => ({
-							value: f.path,
-							label: `${statusLabel[f.status]}  ${f.path}`,
-						})),
+						{ value: "all" as const, label: `All files (${allPaths.length})` },
+						{ value: "pick" as const, label: "Pick individually" },
 					],
+				})
+				if (p.isCancel(pickMode)) return { kind: "user_cancelled" }
+				if (pickMode === "all") {
+					return { kind: "files_picked", selectedFiles: allPaths }
+				}
+				const selected = await p.multiselect({
+					message: "Select files to include",
+					options: effect.files.map(f => ({
+						value: f.path,
+						label: `${statusLabel[f.status]}  ${f.path}`,
+					})),
 					initialValues: effect.files.filter(f => f.status === "staged").map(f => f.path),
 					required: true,
 				})
 				if (p.isCancel(selected)) return { kind: "user_cancelled" }
-				const picked = selected.includes(ALL) ? allPaths : selected
-				return { kind: "files_picked", selectedFiles: picked }
+				return { kind: "files_picked", selectedFiles: selected }
 			}
 
 			case "stage_files": {
@@ -186,12 +222,19 @@ export class EffectExecutor {
 				const s = p.spinner()
 				s.start("Generating commit details...")
 				const result = await this.llm.generateCommitDetails(effect.diff)
-				s.stop("Commit details generated.")
-				if (!result) return { kind: "details_failed" }
-				return { kind: "details_generated", details: result }
+				s.stop(result ? "Commit details generated." : "LLM generation failed.")
+				if (result) return { kind: "details_generated", details: result }
+				if (this.isAuto) return { kind: "details_failed" }
+				p.log.warn("Falling back to manual input.")
+				const manual = await this.manual.generateCommitDetails(effect.diff)
+				if (!manual) return { kind: "details_failed" }
+				return { kind: "details_generated", details: manual }
 			}
 
 			case "prompt_branch_name": {
+				if (this.isAuto) {
+					return { kind: "branch_confirmed", branchName: effect.suggestion }
+				}
 				const input = await p.text({
 					message: "Branch name",
 					defaultValue: effect.suggestion,
@@ -210,6 +253,9 @@ export class EffectExecutor {
 				return null
 
 			case "prompt_commit_action": {
+				if (this.isAuto) {
+					return { kind: "commit_action", action: "accept" }
+				}
 				const action = await p.select({
 					message: "Use this commit message?",
 					options: [
@@ -248,6 +294,9 @@ export class EffectExecutor {
 				return null
 
 			case "prompt_create_pr": {
+				if (this.isAuto) {
+					return { kind: "confirm_pr", accepted: true }
+				}
 				const accepted = await p.confirm({ message: "Create PR with this?", initialValue: true })
 				if (p.isCancel(accepted)) return { kind: "user_cancelled" }
 				return { kind: "confirm_pr", accepted }
@@ -278,6 +327,9 @@ export class EffectExecutor {
 			}
 
 			case "prompt_confirm_pull": {
+				if (this.isAuto) {
+					return { kind: "confirm_pull", accepted: true }
+				}
 				p.log.warn(`Branch is ${effect.behind} commit(s) behind remote.`)
 				const accepted = await p.confirm({ message: "Pull latest changes?", initialValue: true })
 				if (p.isCancel(accepted)) return { kind: "confirm_pull", accepted: false }
@@ -297,18 +349,38 @@ export class EffectExecutor {
 			}
 
 			case "prompt_post_commit": {
+				if (this.isAuto) {
+					const goal = this.mode.kind === "auto" ? this.mode.goal : "local"
+					if (goal === "local") return { kind: "post_commit_choice", choice: "done" }
+					if (goal === "push") return { kind: "post_commit_choice", choice: "push_only" }
+					return { kind: "post_commit_choice", choice: "create_pr" }
+				}
 				const choice = await p.select({
 					message: "What next?",
 					options: [
 						{ value: "create_pr" as const, label: "Create PR" },
-						{ value: "push_only" as const, label: "Push only" },
-						{ value: "commit_more" as const, label: "Commit more files" },
+						{ value: "push_only" as const, label: "Push" },
+						{ value: "commit_more" as const, label: "Add more changes" },
 						{ value: "done" as const, label: "Done (local only)" },
 					],
 				})
 				if (p.isCancel(choice)) return { kind: "post_commit_choice", choice: "done" }
 				return { kind: "post_commit_choice", choice: choice as "create_pr" | "push_only" | "commit_more" | "done" }
 			}
+
+			case "execute_stack_commit": {
+				runOk(["git", "reset", "HEAD", "--quiet"])
+				for (const f of effect.group.files) {
+					runLive(["git", "add", f])
+				}
+				if (effect.isFirst && effect.onMain) {
+					runLive(["git", "checkout", "-b", effect.branchName])
+				}
+				runLive(["git", "commit", "-m", effect.group.commitMessage])
+				p.log.success(`Commit ${effect.index + 1}: ${effect.group.commitMessage.split("\n")[0]}`)
+				return { kind: "stack_commit_done", nextIndex: effect.index + 1 }
+			}
 		}
+		throw new Error(`Unhandled effect: ${(effect as any).kind}`)
 	}
 }
