@@ -1,0 +1,19 @@
+{
+  "name": "ship",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "ship": "ship.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.0.0",
+    "picocolors": "^1.1.1"
+  }
+}

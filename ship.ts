@@ -1,0 +1,61 @@
+import * as p from "@clack/prompts"
+import pc from "picocolors"
+import { isTerminal } from "./states.ts"
+import type { State, Effect, Event } from "./states.ts"
+import { transition } from "./transitions.ts"
+import { EffectExecutor } from "./effects.ts"
+import { createLlmProvider } from "./llm.ts"
+
+// ── Run loop ───────────────────────────────────────────────────────
+
+p.intro(pc.bgCyan(pc.black(" ship ")))
+
+const executor = new EffectExecutor(createLlmProvider())
+
+let state: State = { kind: "preflight" }
+let effects: Effect[] = [{ kind: "check_tools" }]
+
+while (!isTerminal(state)) {
+	let event: Event | null = null
+
+	for (const eff of effects) {
+		try {
+			const result = await executor.execute(eff)
+			if (result !== null) event = result
+		} catch (err) {
+			state = { kind: "error", message: err instanceof Error ? err.message : String(err) }
+			break
+		}
+	}
+
+	if (isTerminal(state)) break
+	if (!event) {
+		state = { kind: "error", message: "No event produced — state machine stalled." }
+		break
+	}
+
+	const next = transition(state, event)
+	state = next.state
+	effects = next.effects
+}
+
+// ── Terminal rendering ─────────────────────────────────────────────
+
+switch (state.kind) {
+	case "done":
+		p.outro(pc.green(state.message))
+		break
+	case "cancelled":
+		p.cancel(state.message)
+		break
+	case "error":
+		p.log.error(state.message)
+		process.exit(1)
+	case "nothing_to_ship":
+		p.log.warn("Nothing to ship. Working tree is clean and no unmerged commits.")
+		break
+	case "merge_conflict":
+		p.log.warn("Merge conflict detected. Resolve manually, then run ship again.")
+		p.log.info(state.message)
+		process.exit(1)
+}
