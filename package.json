@@ -6,6 +6,12 @@
   "bin": {
     "ship": "ship.ts"
   },
+  "scripts": {
+    "check": "biome check",
+    "fix": "biome check --write",
+    "format": "biome format --write",
+    "lint": "biome lint"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.3.15",
     "@types/bun": "latest"
