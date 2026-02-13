@@ -469,15 +469,16 @@ export function transition(state: State, event: Event): Transition {
 					}],
 				}
 			}
+			const actualBranch = state.git.onMain ? plan.branchName : state.git.currentBranch
 			const details = {
-				branchName: plan.branchName,
+				branchName: actualBranch,
 				commitMessage: plan.groups.map(g => g.commitMessage).join("\n"),
 				prTitle: plan.prTitle,
 				prBody: plan.prBody,
 			}
 			return {
-				state: { kind: "post_commit_checking_pr", git: { ...state.git, onMain: false }, details, branchName: plan.branchName },
-				effects: [{ kind: "check_existing_pr", branch: plan.branchName }],
+				state: { kind: "post_commit_checking_pr", git: { ...state.git, onMain: false }, details, branchName: actualBranch },
+				effects: [{ kind: "check_existing_pr", branch: actualBranch }],
 			}
 		}
 
