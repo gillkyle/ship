@@ -62,9 +62,15 @@ export class EffectExecutor {
 				return { kind: "commit_log_ready", commitLog }
 			}
 
-			case "push_branch":
+			case "push_branch": {
+				if (effect.branch === "main" || effect.branch === "master") {
+					p.log.warn(`You're about to push directly to ${pc.bold(effect.branch)}.`)
+					const confirmed = await p.confirm({ message: `Push to ${pc.bold(effect.branch)}?`, initialValue: false })
+					if (p.isCancel(confirmed) || !confirmed) return { kind: "user_cancelled" }
+				}
 				runLive(["git", "push", "-u", "origin", effect.branch])
 				return { kind: "push_done" }
+			}
 
 			case "check_existing_pr": {
 				const exists = runOk(["gh", "pr", "view", effect.branch, "--json", "url"])
