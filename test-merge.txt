@@ -1,4 +1,0 @@
-This is a test file for testing the merge flow.
-
-PR #1: Initial creation of test file.
-PR #2: Adding more content to test merge between PRs.

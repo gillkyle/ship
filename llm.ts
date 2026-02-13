@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts"
 import type { CliMode, CommitDetails, FileEntry, PrDetails, StackPlan } from "./states.ts"
+import { loadConfig } from "./config.ts"
 
 // ── Provider Interface ─────────────────────────────────────────────
 
@@ -79,6 +80,29 @@ const STACK_SCHEMA = {
 	additionalProperties: false as const,
 }
 
+// ── Diff Truncation ───────────────────────────────────────────────
+
+const MAX_DIFF_PER_FILE = 1500
+const MAX_DIFF_TOTAL = 15000
+
+function truncateDiff(raw: string): string {
+	const sections = raw.split(/^(?=diff --git )/m)
+	const truncated = sections.map(section => {
+		if (!section) return section
+		const newlineIdx = section.indexOf("\n")
+		if (newlineIdx === -1) return section
+		const header = section.slice(0, newlineIdx)
+		const body = section.slice(newlineIdx + 1)
+		if (body.length <= MAX_DIFF_PER_FILE) return section
+		return `${header}\n${body.slice(0, MAX_DIFF_PER_FILE)}\n...(truncated)`
+	})
+	let result = truncated.join("")
+	if (result.length > MAX_DIFF_TOTAL) {
+		result = result.slice(0, MAX_DIFF_TOTAL) + "\n...(truncated)"
+	}
+	return result
+}
+
 // ── Groq Provider ──────────────────────────────────────────────────
 
 class GroqProvider implements LlmProvider {
@@ -111,7 +135,8 @@ class GroqProvider implements LlmProvider {
 		}))
 	}
 
-	private async call<T>(systemPrompt: string, diff: string, name: string, schema: object, map: (raw: any) => T): Promise<T | null> {
+	private async call<T>(systemPrompt: string, userContent: string, name: string, schema: object, map: (raw: any) => T): Promise<T | null> {
+		const diff = truncateDiff(userContent)
 		try {
 			const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
 				method: "POST",
@@ -177,7 +202,8 @@ class AnthropicProvider implements LlmProvider {
 		}))
 	}
 
-	private async call<T>(systemPrompt: string, diff: string, name: string, schema: object, map: (raw: any) => T): Promise<T | null> {
+	private async call<T>(systemPrompt: string, userContent: string, name: string, schema: object, map: (raw: any) => T): Promise<T | null> {
+		const diff = truncateDiff(userContent)
 		try {
 			const res = await fetch("https://api.anthropic.com/v1/messages", {
 				method: "POST",
@@ -213,9 +239,6 @@ class AnthropicProvider implements LlmProvider {
 
 export class ManualProvider implements LlmProvider {
 	async generateCommitDetails(_diff: string): Promise<CommitDetails | null> {
-		const branchName = await p.text({ message: "Branch name", placeholder: "feat-my-feature" })
-		if (p.isCancel(branchName)) return null
-
 		const commitMessage = await p.text({ message: "Commit message", placeholder: "feat: add feature" })
 		if (p.isCancel(commitMessage)) return null
 
@@ -225,8 +248,12 @@ export class ManualProvider implements LlmProvider {
 		const prBody = await p.text({ message: "PR body", placeholder: "## Summary\n- ..." })
 		if (p.isCancel(prBody)) return null
 
+		// Derive branch name from commit message; state machine will prompt separately if on main
+		const msg = (commitMessage as string).split("\n")[0] ?? ""
+		const branchName = msg.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "my-feature"
+
 		return {
-			branchName: branchName as string,
+			branchName,
 			commitMessage: commitMessage as string,
 			prTitle: prTitle as string,
 			prBody: prBody as string,
@@ -251,17 +278,19 @@ export class ManualProvider implements LlmProvider {
 // ── Factory ────────────────────────────────────────────────────────
 
 export function createLlmProvider(mode: CliMode): LlmProvider {
-	const groqKey = process.env.GROQ_API_KEY
-	const anthropicKey = process.env.ANTHROPIC_API_KEY
+	const config = loadConfig()
+	const groqKey = config.groqApiKey || process.env.GROQ_API_KEY
+	const anthropicKey = config.anthropicApiKey || process.env.ANTHROPIC_API_KEY
 
 	if (mode.kind === "auto") {
 		if (groqKey) return new GroqProvider(groqKey)
 		if (anthropicKey) return new AnthropicProvider(anthropicKey)
-		p.log.error("Autonomous mode requires GROQ_API_KEY or ANTHROPIC_API_KEY.")
+		p.log.error("Autonomous mode requires an API key. Run `ship setup` to configure one.")
 		process.exit(1)
 	}
 
 	if (groqKey) return new GroqProvider(groqKey)
 	if (anthropicKey) return new AnthropicProvider(anthropicKey)
+	p.log.info("No API key found. Run `ship setup` to configure one.")
 	return new ManualProvider()
 }
