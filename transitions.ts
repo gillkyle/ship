@@ -312,10 +312,27 @@ export function transition(state: State, event: Event): Transition {
 
 		case "committing": {
 			if (event.kind !== "commit_done") return invalid(state, event)
+			const git = { ...state.git, onMain: false }
 			return {
-				state: { kind: "post_commit", git: { ...state.git, onMain: false }, details: state.details, branchName: state.branchName },
-				effects: [{ kind: "prompt_post_commit" }],
+				state: { kind: "post_commit_checking_pr", git, details: state.details, branchName: state.branchName },
+				effects: [{ kind: "check_existing_pr", branch: state.branchName }],
 			}
+		}
+
+		case "post_commit_checking_pr": {
+			if (event.kind === "pr_exists") {
+				return {
+					state: { kind: "post_commit", git: state.git, details: state.details, branchName: state.branchName, prUrl: event.prUrl },
+					effects: [{ kind: "prompt_post_commit", prUrl: event.prUrl }],
+				}
+			}
+			if (event.kind === "no_pr") {
+				return {
+					state: { kind: "post_commit", git: state.git, details: state.details, branchName: state.branchName },
+					effects: [{ kind: "prompt_post_commit" }],
+				}
+			}
+			return invalid(state, event)
 		}
 
 		// ── Post-commit hub ──────────────────────────────────────
@@ -459,8 +476,8 @@ export function transition(state: State, event: Event): Transition {
 				prBody: plan.prBody,
 			}
 			return {
-				state: { kind: "post_commit", git: { ...state.git, onMain: false }, details, branchName: plan.branchName },
-				effects: [{ kind: "prompt_post_commit" }],
+				state: { kind: "post_commit_checking_pr", git: { ...state.git, onMain: false }, details, branchName: plan.branchName },
+				effects: [{ kind: "check_existing_pr", branch: plan.branchName }],
 			}
 		}
 

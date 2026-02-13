@@ -81,10 +81,11 @@ export class EffectExecutor {
 			}
 
 			case "generate_pr_details": {
-				const s = p.spinner()
-				s.start("Generating PR details...")
+				const isManual = this.llm instanceof ManualProvider
+				const s = isManual ? null : p.spinner()
+				s?.start("Generating PR details...")
 				const result = await this.llm.generatePrDetails(effect.diff)
-				s.stop(result ? "PR details generated." : "LLM generation failed.")
+				s?.stop(result ? "PR details generated." : "LLM generation failed.")
 				if (result) return { kind: "pr_details_generated", prDetails: result }
 				if (this.isAuto) return { kind: "pr_details_failed" }
 				p.log.warn("Falling back to manual input.")
@@ -219,10 +220,11 @@ export class EffectExecutor {
 			}
 
 			case "generate_commit_details": {
-				const s = p.spinner()
-				s.start("Generating commit details...")
+				const isManual = this.llm instanceof ManualProvider
+				const s = isManual ? null : p.spinner()
+				s?.start("Generating commit details...")
 				const result = await this.llm.generateCommitDetails(effect.diff)
-				s.stop(result ? "Commit details generated." : "LLM generation failed.")
+				s?.stop(result ? "Commit details generated." : "LLM generation failed.")
 				if (result) return { kind: "details_generated", details: result }
 				if (this.isAuto) return { kind: "details_failed" }
 				p.log.warn("Falling back to manual input.")
@@ -355,10 +357,11 @@ export class EffectExecutor {
 					if (goal === "push") return { kind: "post_commit_choice", choice: "push_only" }
 					return { kind: "post_commit_choice", choice: "create_pr" }
 				}
+				const prLabel = effect.prUrl ? "Push & update PR" : "Create PR"
 				const choice = await p.select({
 					message: "What next?",
 					options: [
-						{ value: "create_pr" as const, label: "Create PR" },
+						{ value: "create_pr" as const, label: prLabel },
 						{ value: "push_only" as const, label: "Push" },
 						{ value: "commit_more" as const, label: "Add more changes" },
 						{ value: "done" as const, label: "Done (local only)" },

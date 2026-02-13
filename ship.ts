@@ -6,6 +6,7 @@ import type { State, Effect, Event, CliMode } from "./states.ts"
 import { transition } from "./transitions.ts"
 import { EffectExecutor } from "./effects.ts"
 import { createLlmProvider } from "./llm.ts"
+import { runSetup } from "./setup.ts"
 
 // ── Argument parsing ───────────────────────────────────────────────
 
@@ -26,6 +27,9 @@ function parseArgs(argv: string[]): CliMode {
 		process.exit(1)
 	}
 
+	const positional = args.filter(a => !a.startsWith("--"))
+	if (positional[0] === "setup") return { kind: "setup" }
+
 	if (hasLocal) return { kind: "auto", goal: "local", stack: false }
 	if (hasPush) return { kind: "auto", goal: "push", stack: hasStack }
 	if (hasPr) return { kind: "auto", goal: "pr", stack: hasStack }
@@ -36,10 +40,19 @@ function parseArgs(argv: string[]): CliMode {
 
 const mode = parseArgs(process.argv)
 
+if (mode.kind === "setup") {
+	const { version } = await import("./package.json")
+	p.intro(pc.bgCyan(pc.black(" ship setup ")) + pc.dim(` v${version}`))
+	await runSetup()
+	process.exit(0)
+}
+
+const { version } = await import("./package.json")
+
 const modeLabel = mode.kind === "auto"
 	? ` ${pc.dim(`--${mode.goal}${mode.stack ? " --stack" : ""}`)}`
 	: ""
-p.intro(pc.bgCyan(pc.black(" ship ")) + modeLabel)
+p.intro(pc.bgCyan(pc.black(" ship ")) + pc.dim(` v${version}`) + modeLabel)
 
 const executor = new EffectExecutor(createLlmProvider(mode), mode)
 

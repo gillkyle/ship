@@ -265,13 +265,32 @@ describe("full path", () => {
 		expect((result.state as any).commitMessage).toBe("fix: edited msg")
 	})
 
-	test("committing → post_commit", () => {
+	test("committing → post_commit_checking_pr", () => {
 		const result = transition(
 			{ kind: "committing", git: featureGit, details, branchName: "feat-thing", commitMessage: "feat: x" },
 			{ kind: "commit_done" },
 		)
+		expect(result.state.kind).toBe("post_commit_checking_pr")
+		expect(result.effects[0]!.kind).toBe("check_existing_pr")
+	})
+
+	test("post_commit_checking_pr with pr_exists → post_commit with prUrl", () => {
+		const result = transition(
+			{ kind: "post_commit_checking_pr", git: featureGit, details, branchName: "feat-thing" },
+			{ kind: "pr_exists", prUrl: "https://github.com/x/pull/1" },
+		)
 		expect(result.state.kind).toBe("post_commit")
-		expect(result.effects[0]!.kind).toBe("prompt_post_commit")
+		expect((result.state as any).prUrl).toBe("https://github.com/x/pull/1")
+		expect((result.effects[0] as any).prUrl).toBe("https://github.com/x/pull/1")
+	})
+
+	test("post_commit_checking_pr with no_pr → post_commit without prUrl", () => {
+		const result = transition(
+			{ kind: "post_commit_checking_pr", git: featureGit, details, branchName: "feat-thing" },
+			{ kind: "no_pr" },
+		)
+		expect(result.state.kind).toBe("post_commit")
+		expect((result.state as any).prUrl).toBeUndefined()
 	})
 
 	test("checking PR exists → confirming merge", () => {

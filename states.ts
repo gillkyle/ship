@@ -3,6 +3,7 @@
 export type CliMode =
 	| { kind: "interactive" }
 	| { kind: "auto"; goal: "local" | "push" | "pr"; stack: boolean }
+	| { kind: "setup" }
 
 // ── Data Types ─────────────────────────────────────────────────────
 
@@ -72,7 +73,8 @@ export type State =
 	| { kind: "confirming_commit"; git: GitContext; details: CommitDetails; branchName: string }
 	| { kind: "editing_commit"; git: GitContext; details: CommitDetails; branchName: string }
 	| { kind: "committing"; git: GitContext; details: CommitDetails; branchName: string; commitMessage: string }
-	| { kind: "post_commit"; git: GitContext; details: CommitDetails; branchName: string }
+	| { kind: "post_commit_checking_pr"; git: GitContext; details: CommitDetails; branchName: string }
+	| { kind: "post_commit"; git: GitContext; details: CommitDetails; branchName: string; prUrl?: string }
 	| { kind: "pushing"; git: GitContext; branchName: string; details: CommitDetails; postPush: "check_pr" | "done" }
 	| { kind: "checking_pr"; git: GitContext; details: CommitDetails; branchName: string }
 	| { kind: "confirming_pr"; git: GitContext; details: CommitDetails; branchName: string }
@@ -163,7 +165,7 @@ export type Effect =
 	| { kind: "check_remote_status"; branch: string }
 	| { kind: "prompt_confirm_pull"; behind: number }
 	| { kind: "pull_remote"; branch: string }
-	| { kind: "prompt_post_commit" }
+	| { kind: "prompt_post_commit"; prUrl?: string }
 	| { kind: "execute_stack_commit"; group: StackGroup; branchName: string; isFirst: boolean; onMain: boolean; index: number }
 
 // ── Helpers ────────────────────────────────────────────────────────
