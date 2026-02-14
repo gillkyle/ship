@@ -7,6 +7,7 @@ import { transition } from "./transitions.ts"
 import { EffectExecutor } from "./effects.ts"
 import { createLlmProvider } from "./llm.ts"
 import { runSetup } from "./setup.ts"
+import { runConfigure } from "./configure.ts"
 
 // ── Argument parsing ───────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ function parseArgs(argv: string[]): CliMode {
 
 	const positional = args.filter(a => !a.startsWith("--"))
 	if (positional[0] === "setup") return { kind: "setup" }
+	if (positional[0] === "config") return { kind: "config" }
 
 	if (hasLocal) return { kind: "auto", goal: "local", stack: false }
 	if (hasPush) return { kind: "auto", goal: "push", stack: hasStack }
@@ -44,6 +46,13 @@ if (mode.kind === "setup") {
 	const { version } = await import("./package.json")
 	p.intro(pc.bgCyan(pc.black(" ship setup ")) + pc.dim(` v${version}`))
 	await runSetup()
+	process.exit(0)
+}
+
+if (mode.kind === "config") {
+	const { version } = await import("./package.json")
+	p.intro(pc.bgCyan(pc.black(" ship config ")) + pc.dim(` v${version}`))
+	await runConfigure()
 	process.exit(0)
 }
 

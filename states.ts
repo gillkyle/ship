@@ -4,6 +4,7 @@ export type CliMode =
 	| { kind: "interactive" }
 	| { kind: "auto"; goal: "local" | "push" | "pr"; stack: boolean }
 	| { kind: "setup" }
+	| { kind: "config" }
 
 // ── Data Types ─────────────────────────────────────────────────────
 
