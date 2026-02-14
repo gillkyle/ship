@@ -4,9 +4,13 @@ import { readFileSync, mkdirSync, writeFileSync, chmodSync } from "node:fs"
 
 export const CONFIG_PATH = join(homedir(), ".config", "ship", "config.json")
 
+export type MergeStrategy = "merge" | "squash" | "rebase"
+export const DEFAULT_MERGE_STRATEGY: MergeStrategy = "merge"
+
 export interface ShipConfig {
 	groqApiKey?: string
 	anthropicApiKey?: string
+	mergeStrategy?: MergeStrategy
 }
 
 export function loadConfig(): ShipConfig {
