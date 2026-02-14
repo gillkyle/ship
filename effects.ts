@@ -1,12 +1,16 @@
 import * as p from "@clack/prompts"
 import pc from "picocolors"
-import { run, runOk, runLive } from "./git.ts"
+import { run, runOk, runLive, gitRoot } from "./git.ts"
 import { ManualProvider, type LlmProvider } from "./llm.ts"
 import type { CliMode, Effect, Event, FileEntry } from "./states.ts"
+import { loadConfig, DEFAULT_MERGE_STRATEGY, type MergeStrategy } from "./config.ts"
 
 export class EffectExecutor {
 	private manual = new ManualProvider()
-	constructor(private llm: LlmProvider, private mode: CliMode) {}
+	private mergeStrategy: MergeStrategy
+	constructor(private llm: LlmProvider, private mode: CliMode) {
+		this.mergeStrategy = loadConfig().mergeStrategy ?? DEFAULT_MERGE_STRATEGY
+	}
 
 	private get isAuto() { return this.mode.kind === "auto" }
 	private get isStack() { return this.mode.kind === "auto" && this.mode.stack }
@@ -133,7 +137,7 @@ export class EffectExecutor {
 			}
 
 			case "merge_and_cleanup": {
-				runLive(["gh", "pr", "merge", effect.prUrl, "--squash", "--delete-branch"])
+				runLive(["gh", "pr", "merge", effect.prUrl, `--${this.mergeStrategy}`, "--delete-branch"])
 				if (effect.onMain) {
 					runLive(["git", "checkout", "main"])
 				}
@@ -317,7 +321,7 @@ export class EffectExecutor {
 
 			case "log_merge_skip":
 				p.log.info(`To check out the branch: ${pc.cyan(`git checkout ${effect.branchName}`)}`)
-				p.log.info(`To merge later:          ${pc.cyan(`gh pr merge --squash`)}`)
+				p.log.info(`To merge later:          ${pc.cyan(`gh pr merge --${this.mergeStrategy}`)}`)
 				return null
 
 			case "log_pr_skip":
@@ -345,7 +349,7 @@ export class EffectExecutor {
 			}
 
 			case "pull_remote": {
-				const result = Bun.spawnSync(["git", "pull", "origin", effect.branch], { stdout: "pipe", stderr: "pipe" })
+				const result = Bun.spawnSync(["git", "pull", "origin", effect.branch], { cwd: gitRoot, stdout: "pipe", stderr: "pipe" })
 				if (result.exitCode !== 0) {
 					const stderr = result.stderr.toString()
 					if (stderr.includes("CONFLICT") || stderr.includes("merge conflict")) {
