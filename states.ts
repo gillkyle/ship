@@ -64,6 +64,8 @@ export type State =
 	| { kind: "fast_path_creating_pr"; git: GitContext; prDetails: PrDetails }
 	| { kind: "fast_path_confirming_merge"; git: GitContext; prUrl: string }
 	| { kind: "fast_path_merging"; git: GitContext; prUrl: string }
+	| { kind: "merge_blocked_prompting"; git: GitContext; prUrl: string; branchName: string; onMain: boolean }
+	| { kind: "merge_retrying"; git: GitContext; prUrl: string; branchName: string }
 	// Full path (uncommitted changes)
 	| { kind: "collecting_files"; git: GitContext }
 	| { kind: "picking_files"; git: GitContext; files: FileEntry[] }
@@ -107,8 +109,11 @@ export type Event =
 	| { kind: "pr_details_failed" }
 	| { kind: "confirm_pr"; accepted: boolean }
 	| { kind: "pr_created"; prUrl: string }
-	| { kind: "confirm_merge"; accepted: boolean }
+	| { kind: "confirm_merge"; choice: "merge" | "auto" | "admin" | "skip" }
+	| { kind: "merge_blocked"; prUrl: string }
 	| { kind: "merge_done"; prUrl: string }
+	| { kind: "merge_auto_enabled"; prUrl: string }
+	| { kind: "merge_choice"; choice: "auto" | "admin" | "skip" }
 	| { kind: "files_collected"; files: FileEntry[] }
 	| { kind: "files_picked"; selectedFiles: string[] }
 	| { kind: "files_staged"; shortStat: string }
@@ -145,7 +150,9 @@ export type Effect =
 	| { kind: "log_pr_found"; prUrl: string }
 	| { kind: "log_pr_created"; prUrl: string }
 	| { kind: "prompt_confirm_merge"; prUrl: string }
-	| { kind: "merge_and_cleanup"; prUrl: string; onMain: boolean }
+	| { kind: "merge_and_cleanup"; prUrl: string }
+	| { kind: "prompt_merge_blocked" }
+	| { kind: "merge_with_flag"; prUrl: string; flag: "auto" | "admin" }
 	| { kind: "collect_files"; git: GitContext }
 	| { kind: "prompt_file_picker"; files: FileEntry[] }
 	| { kind: "stage_files"; selectedFiles: string[] }

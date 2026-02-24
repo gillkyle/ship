@@ -176,19 +176,31 @@ export function transition(state: State, event: Event): Transition {
 
 		case "fast_path_confirming_merge": {
 			if (event.kind !== "confirm_merge") return invalid(state, event)
-			if (!event.accepted) {
+			if (event.choice === "skip") {
 				return {
 					state: { kind: "done", message: `PR open: ${state.prUrl}` },
 					effects: [{ kind: "log_merge_skip", prUrl: state.prUrl, branchName: state.git.currentBranch, onMain: state.git.onMain }],
 				}
 			}
+			if (event.choice === "merge") {
+				return {
+					state: { kind: "fast_path_merging", git: state.git, prUrl: state.prUrl },
+					effects: [{ kind: "merge_and_cleanup", prUrl: state.prUrl }],
+				}
+			}
 			return {
-				state: { kind: "fast_path_merging", git: state.git, prUrl: state.prUrl },
-				effects: [{ kind: "merge_and_cleanup", prUrl: state.prUrl, onMain: state.git.onMain }],
+				state: { kind: "merge_retrying", git: state.git, prUrl: state.prUrl, branchName: state.git.currentBranch },
+				effects: [{ kind: "merge_with_flag", prUrl: state.prUrl, flag: event.choice }],
 			}
 		}
 
 		case "fast_path_merging": {
+			if (event.kind === "merge_blocked") {
+				return {
+					state: { kind: "merge_blocked_prompting", git: state.git, prUrl: state.prUrl, branchName: state.git.currentBranch, onMain: state.git.onMain },
+					effects: [{ kind: "prompt_merge_blocked" }],
+				}
+			}
 			if (event.kind !== "merge_done") return invalid(state, event)
 			return {
 				state: { kind: "done", message: `Shipped! ${event.prUrl}` },
@@ -432,24 +444,69 @@ export function transition(state: State, event: Event): Transition {
 				return { state: { kind: "cancelled", message: "Cancelled." }, effects: [] }
 			}
 			if (event.kind !== "confirm_merge") return invalid(state, event)
-			if (!event.accepted) {
+			if (event.choice === "skip") {
 				return {
 					state: { kind: "done", message: `PR open: ${state.prUrl}` },
 					effects: [{ kind: "log_merge_skip", prUrl: state.prUrl, branchName: state.branchName, onMain: state.git.onMain }],
 				}
 			}
+			if (event.choice === "merge") {
+				return {
+					state: { kind: "merging", git: state.git, branchName: state.branchName, prUrl: state.prUrl },
+					effects: [{ kind: "merge_and_cleanup", prUrl: state.prUrl }],
+				}
+			}
 			return {
-				state: { kind: "merging", git: state.git, branchName: state.branchName, prUrl: state.prUrl },
-				effects: [{ kind: "merge_and_cleanup", prUrl: state.prUrl, onMain: state.git.onMain }],
+				state: { kind: "merge_retrying", git: state.git, prUrl: state.prUrl, branchName: state.branchName },
+				effects: [{ kind: "merge_with_flag", prUrl: state.prUrl, flag: event.choice }],
 			}
 		}
 
 		case "merging": {
+			if (event.kind === "merge_blocked") {
+				return {
+					state: { kind: "merge_blocked_prompting", git: state.git, prUrl: state.prUrl, branchName: state.branchName, onMain: state.git.onMain },
+					effects: [{ kind: "prompt_merge_blocked" }],
+				}
+			}
 			if (event.kind !== "merge_done") return invalid(state, event)
 			return {
 				state: { kind: "done", message: `Shipped! ${event.prUrl}` },
 				effects: [],
 			}
+		}
+
+		case "merge_blocked_prompting": {
+			if (event.kind === "user_cancelled") {
+				return { state: { kind: "cancelled", message: "Cancelled." }, effects: [] }
+			}
+			if (event.kind !== "merge_choice") return invalid(state, event)
+			if (event.choice === "skip") {
+				return {
+					state: { kind: "done", message: `PR open: ${state.prUrl}` },
+					effects: [{ kind: "log_merge_skip", prUrl: state.prUrl, branchName: state.branchName, onMain: state.onMain }],
+				}
+			}
+			return {
+				state: { kind: "merge_retrying", git: state.git, prUrl: state.prUrl, branchName: state.branchName },
+				effects: [{ kind: "merge_with_flag", prUrl: state.prUrl, flag: event.choice }],
+			}
+		}
+
+		case "merge_retrying": {
+			if (event.kind === "merge_done") {
+				return {
+					state: { kind: "done", message: `Shipped! ${event.prUrl}` },
+					effects: [],
+				}
+			}
+			if (event.kind === "merge_auto_enabled") {
+				return {
+					state: { kind: "done", message: `Auto-merge enabled: ${event.prUrl}` },
+					effects: [],
+				}
+			}
+			return invalid(state, event)
 		}
 
 		// ── Stack committing ────────────────────────────────────

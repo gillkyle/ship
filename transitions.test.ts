@@ -128,11 +128,11 @@ describe("fast path", () => {
 		expect(result.state.kind).toBe("fast_path_generating_pr")
 	})
 
-	test("confirming merge declined → done with PR URL", () => {
+	test("confirming merge skip → done with PR URL", () => {
 		const g = git({ currentBranch: "feat-x", onMain: false })
 		const result = transition(
 			{ kind: "fast_path_confirming_merge", git: g, prUrl: "https://pr" },
-			{ kind: "confirm_merge", accepted: false },
+			{ kind: "confirm_merge", choice: "skip" },
 		)
 		expect(result.state.kind).toBe("done")
 		expect((result.state as any).message).toContain("https://pr")
@@ -142,9 +142,27 @@ describe("fast path", () => {
 		const g = git({ currentBranch: "feat-x", onMain: false })
 		const result = transition(
 			{ kind: "fast_path_confirming_merge", git: g, prUrl: "https://pr" },
-			{ kind: "confirm_merge", accepted: true },
+			{ kind: "confirm_merge", choice: "merge" },
 		)
 		expect(result.state.kind).toBe("fast_path_merging")
+	})
+
+	test("confirming merge auto → merge_retrying", () => {
+		const g = git({ currentBranch: "feat-x", onMain: false })
+		const result = transition(
+			{ kind: "fast_path_confirming_merge", git: g, prUrl: "https://pr" },
+			{ kind: "confirm_merge", choice: "auto" },
+		)
+		expect(result.state.kind).toBe("merge_retrying")
+	})
+
+	test("confirming merge admin → merge_retrying", () => {
+		const g = git({ currentBranch: "feat-x", onMain: false })
+		const result = transition(
+			{ kind: "fast_path_confirming_merge", git: g, prUrl: "https://pr" },
+			{ kind: "confirm_merge", choice: "admin" },
+		)
+		expect(result.state.kind).toBe("merge_retrying")
 	})
 
 	test("merging → done", () => {
@@ -336,7 +354,7 @@ describe("full path", () => {
 	test("merge accepted → merging", () => {
 		const result = transition(
 			{ kind: "confirming_merge", git: featureGit, branchName: "feat-thing", prUrl: "https://pr" },
-			{ kind: "confirm_merge", accepted: true },
+			{ kind: "confirm_merge", choice: "merge" },
 		)
 		expect(result.state.kind).toBe("merging")
 	})
@@ -344,7 +362,7 @@ describe("full path", () => {
 	test("merge declined → done", () => {
 		const result = transition(
 			{ kind: "confirming_merge", git: featureGit, branchName: "feat-thing", prUrl: "https://pr" },
-			{ kind: "confirm_merge", accepted: false },
+			{ kind: "confirm_merge", choice: "skip" },
 		)
 		expect(result.state.kind).toBe("done")
 	})

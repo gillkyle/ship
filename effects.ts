@@ -129,20 +129,66 @@ export class EffectExecutor {
 
 			case "prompt_confirm_merge": {
 				if (this.isAuto) {
-					return { kind: "confirm_merge", accepted: false }
+					return { kind: "confirm_merge", choice: "skip" }
 				}
-				const accepted = await p.confirm({ message: "Merge this PR now?", initialValue: true })
-				if (p.isCancel(accepted)) return { kind: "user_cancelled" }
-				return { kind: "confirm_merge", accepted }
+				const choice = await p.select({
+					message: "Merge this PR?",
+					options: [
+						{ value: "merge" as const, label: "Yes, merge now" },
+						{ value: "auto" as const, label: "Enable auto-merge", hint: "merges when requirements are met" },
+						{ value: "admin" as const, label: "Merge with admin privileges", hint: "bypass branch protection" },
+						{ value: "skip" as const, label: "Don't merge now" },
+					],
+				})
+				if (p.isCancel(choice)) return { kind: "user_cancelled" }
+				return { kind: "confirm_merge", choice: choice as "merge" | "auto" | "admin" | "skip" }
 			}
 
 			case "merge_and_cleanup": {
-				runLive(["gh", "pr", "merge", effect.prUrl, `--${this.mergeStrategy}`, "--delete-branch"])
-				if (effect.onMain) {
-					runLive(["git", "checkout", "main"])
+				const mergeResult = Bun.spawnSync(
+					["gh", "pr", "merge", effect.prUrl, `--${this.mergeStrategy}`, "--delete-branch"],
+					{ cwd: gitRoot, stdout: "inherit", stderr: "pipe" },
+				)
+				if (mergeResult.exitCode !== 0) {
+					const stderr = mergeResult.stderr.toString()
+					if (stderr.includes("not mergeable")) {
+						p.log.warn(stderr.trim())
+						return { kind: "merge_blocked", prUrl: effect.prUrl }
+					}
+					throw new Error(`Command failed: gh pr merge ${effect.prUrl} --${this.mergeStrategy} --delete-branch`)
 				}
+				runLive(["git", "checkout", "main"])
 				runLive(["git", "pull", "origin", "main"])
 				return { kind: "merge_done", prUrl: effect.prUrl }
+			}
+
+			case "prompt_merge_blocked": {
+				if (this.isAuto) {
+					return { kind: "merge_choice", choice: "skip" }
+				}
+				const choice = await p.select({
+					message: "PR can't be merged due to branch protection rules",
+					options: [
+						{ value: "auto" as const, label: "Enable auto-merge", hint: "merges when requirements are met" },
+						{ value: "admin" as const, label: "Merge with admin privileges", hint: "bypass branch protection" },
+						{ value: "skip" as const, label: "Don't merge now" },
+					],
+				})
+				if (p.isCancel(choice)) return { kind: "user_cancelled" }
+				return { kind: "merge_choice", choice: choice as "auto" | "admin" | "skip" }
+			}
+
+			case "merge_with_flag": {
+				if (effect.flag === "admin") {
+					runLive(["gh", "pr", "merge", effect.prUrl, `--${this.mergeStrategy}`, "--delete-branch", "--admin"])
+					runLive(["git", "checkout", "main"])
+					runLive(["git", "pull", "origin", "main"])
+					return { kind: "merge_done", prUrl: effect.prUrl }
+				}
+				runLive(["gh", "pr", "merge", effect.prUrl, `--${this.mergeStrategy}`, "--auto"])
+				runLive(["git", "checkout", "main"])
+				runLive(["git", "pull", "origin", "main"])
+				return { kind: "merge_auto_enabled", prUrl: effect.prUrl }
 			}
 
 			case "collect_files": {
